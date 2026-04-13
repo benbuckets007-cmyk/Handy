@@ -829,10 +829,11 @@ pub fn change_experimental_enabled_setting(app: AppHandle, enabled: bool) -> Res
 pub fn change_stt_provider_setting(app: AppHandle, provider: String) -> Result<(), String> {
     let parsed = match provider.as_str() {
         "local" => SttProviderKind::Local,
-        "mai" => SttProviderKind::Mai,
+        // Backward compatibility: older UI values used "mai".
+        "cloud" | "mai" => SttProviderKind::Cloud,
         _ => {
             return Err(format!(
-                "Invalid STT provider '{}'. Expected one of: local, mai",
+                "Invalid STT provider '{}'. Expected one of: local, cloud",
                 provider
             ));
         }
@@ -882,9 +883,25 @@ pub fn change_stt_cloud_model_setting(app: AppHandle, model: String) -> Result<(
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_stt_base_url_setting(app: AppHandle, base_url: String) -> Result<(), String> {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return Err("Cloud base URL cannot be empty".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.stt_base_url = trimmed.to_string();
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_stt_api_key_setting(app: AppHandle, api_key: String) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
-    settings.stt_api_keys.insert("mai".to_string(), api_key);
+    settings.stt_api_keys.insert("cloud".to_string(), api_key);
+    // Remove legacy key to keep the store normalized.
+    settings.stt_api_keys.remove("mai");
     settings::write_settings(&app, settings);
     Ok(())
 }

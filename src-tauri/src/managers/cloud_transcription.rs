@@ -6,9 +6,8 @@ use std::io::Cursor;
 use std::thread;
 use std::time::Duration;
 
-pub const MAI_PROVIDER_ID: &str = "mai";
-pub const MAI_BASE_URL: &str = "https://api.mai-ai.com/v1";
-pub const MAI_DEFAULT_SAMPLE_RATE_HZ: u32 = 16_000;
+pub const STT_CLOUD_PROVIDER_ID: &str = "cloud";
+pub const STT_CLOUD_DEFAULT_SAMPLE_RATE_HZ: u32 = 16_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloudErrorClass {
@@ -64,8 +63,9 @@ struct TranscriptionResponse {
     text: Option<String>,
 }
 
-pub fn transcribe_mai_wav_bytes(
+pub fn transcribe_cloud_wav_bytes(
     wav_bytes: Vec<u8>,
+    base_url: &str,
     api_key: &str,
     model: &str,
     connect_timeout_ms: u64,
@@ -78,6 +78,7 @@ pub fn transcribe_mai_wav_bytes(
     for attempt in 1..=max_attempts {
         match transcribe_once(
             wav_bytes.clone(),
+            base_url,
             api_key,
             model,
             connect_timeout_ms,
@@ -141,6 +142,7 @@ pub fn wav_bytes_from_f32(
 
 fn transcribe_once(
     wav_bytes: Vec<u8>,
+    base_url: &str,
     api_key: &str,
     model: &str,
     connect_timeout_ms: u64,
@@ -170,7 +172,7 @@ fn transcribe_once(
     let response = client
         .post(format!(
             "{}/audio/transcriptions",
-            MAI_BASE_URL.trim_end_matches('/')
+            base_url.trim_end_matches('/')
         ))
         .bearer_auth(api_key)
         .multipart(form)
@@ -224,8 +226,7 @@ fn classify_http_status(status: StatusCode) -> CloudTranscriptionError {
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
         return CloudTranscriptionError {
             class: CloudErrorClass::Auth,
-            message: "Cloud transcription authentication failed. Check your MAI API key."
-                .to_string(),
+            message: "Cloud transcription authentication failed. Check your API key.".to_string(),
         };
     }
 

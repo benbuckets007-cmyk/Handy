@@ -20,7 +20,9 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
     const strategy =
       getSetting("stt_fallback_strategy") ?? "cloud_first_local_fallback";
     const model = getSetting("stt_cloud_model") ?? "MAI-Transcribe-1";
-    const apiKey = getSetting("stt_api_keys")?.mai ?? "";
+    const baseUrl = getSetting("stt_base_url") ?? "https://api.mai-ai.com/v1";
+    const apiKey =
+      getSetting("stt_api_keys")?.cloud ?? getSetting("stt_api_keys")?.mai ?? "";
     const connectTimeout = getSetting("stt_connect_timeout_ms") ?? 3000;
     const requestTimeout = getSetting("stt_request_timeout_ms") ?? 30000;
 
@@ -37,8 +39,8 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
           label: t("settings.advanced.stt.provider.options.local"),
         },
         {
-          value: "mai",
-          label: t("settings.advanced.stt.provider.options.mai"),
+          value: "cloud",
+          label: t("settings.advanced.stt.provider.options.cloud"),
         },
       ],
       [t],
@@ -65,7 +67,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
     );
 
     const showCloudOnlyKeyError =
-      provider === "mai" && strategy === "cloud_only" && !apiKey.trim();
+      provider === "cloud" && strategy === "cloud_only" && !apiKey.trim();
 
     const saveApiKey = async () => {
       if (apiKeyDraft === apiKey) {
@@ -74,7 +76,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
 
       const next = {
         ...(getSetting("stt_api_keys") ?? {}),
-        mai: apiKeyDraft,
+        cloud: apiKeyDraft,
       };
       await updateSetting("stt_api_keys", next);
     };
@@ -97,9 +99,24 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
             options={providerOptions}
             selectedValue={provider}
             onSelect={(value) =>
-              updateSetting("stt_provider", value as "local" | "mai")
+              updateSetting("stt_provider", value as "local" | "cloud")
             }
             disabled={isUpdating("stt_provider")}
+          />
+        </SettingContainer>
+
+        <SettingContainer
+          title={t("settings.advanced.stt.baseUrl.title")}
+          description={t("settings.advanced.stt.baseUrl.description")}
+          descriptionMode={descriptionMode}
+          grouped={grouped}
+        >
+          <Input
+            value={baseUrl}
+            onChange={(e) => updateSetting("stt_base_url", e.target.value)}
+            placeholder={t("settings.advanced.stt.baseUrl.placeholder")}
+            disabled={provider !== "cloud" || isUpdating("stt_base_url")}
+            className="w-[220px]"
           />
         </SettingContainer>
 
@@ -113,7 +130,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
             value={model}
             onChange={(e) => updateSetting("stt_cloud_model", e.target.value)}
             placeholder={t("settings.advanced.stt.cloudModel.placeholder")}
-            disabled={provider !== "mai" || isUpdating("stt_cloud_model")}
+            disabled={provider !== "cloud" || isUpdating("stt_cloud_model")}
             className="w-[220px]"
           />
         </SettingContainer>
@@ -135,7 +152,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
               }
             }}
             placeholder={t("settings.advanced.stt.apiKey.placeholder")}
-            disabled={provider !== "mai" || isUpdating("stt_api_keys")}
+            disabled={provider !== "cloud" || isUpdating("stt_api_keys")}
             className="w-[220px]"
           />
         </SettingContainer>
@@ -179,7 +196,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
               )
             }
             disabled={
-              provider !== "mai" || isUpdating("stt_connect_timeout_ms")
+              provider !== "cloud" || isUpdating("stt_connect_timeout_ms")
             }
             className="w-[220px]"
           />
@@ -202,7 +219,7 @@ export const SttSettings: React.FC<SttSettingsProps> = React.memo(
               )
             }
             disabled={
-              provider !== "mai" || isUpdating("stt_request_timeout_ms")
+              provider !== "cloud" || isUpdating("stt_request_timeout_ms")
             }
             className="w-[220px]"
           />

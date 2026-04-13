@@ -31,6 +31,8 @@ dist-ssr
 /target/
 recording_*
 .crush/
+.artifacts/
+spec.md
 
 # Playwright
 playwright-report/

@@ -174,7 +174,7 @@ pub enum KeyboardImplementation {
 #[serde(rename_all = "snake_case")]
 pub enum SttProviderKind {
     Local,
-    Mai,
+    Cloud,
 }
 
 impl<'de> Deserialize<'de> for SttProviderKind {
@@ -185,7 +185,8 @@ impl<'de> Deserialize<'de> for SttProviderKind {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "local" => SttProviderKind::Local,
-            "mai" => SttProviderKind::Mai,
+            // Backward compatibility: older builds persisted "mai".
+            "cloud" | "mai" => SttProviderKind::Cloud,
             _ => SttProviderKind::default(),
         })
     }
@@ -492,6 +493,8 @@ pub struct AppSettings {
     pub stt_fallback_strategy: SttFallbackStrategy,
     #[serde(default = "default_stt_cloud_model")]
     pub stt_cloud_model: String,
+    #[serde(default = "default_stt_base_url")]
+    pub stt_base_url: String,
     #[serde(default = "default_stt_api_keys")]
     pub stt_api_keys: SecretMap,
     #[serde(default = "default_stt_connect_timeout_ms")]
@@ -716,8 +719,12 @@ fn default_stt_cloud_model() -> String {
     "MAI-Transcribe-1".to_string()
 }
 
+fn default_stt_base_url() -> String {
+    "https://api.mai-ai.com/v1".to_string()
+}
+
 fn default_stt_api_keys() -> SecretMap {
-    SecretMap(HashMap::from([("mai".to_string(), String::new())]))
+    SecretMap(HashMap::from([("cloud".to_string(), String::new())]))
 }
 
 fn default_stt_connect_timeout_ms() -> u64 {
@@ -731,17 +738,34 @@ fn default_stt_request_timeout_ms() -> u64 {
 fn ensure_stt_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
-    if !settings.stt_api_keys.contains_key("mai") {
-        warn!("Normalizing STT settings: missing API key entry for provider 'mai'");
+    if let Some(legacy_mai_key) = settings.stt_api_keys.get("mai").cloned() {
+        if !settings.stt_api_keys.contains_key("cloud") {
+            warn!("Normalizing STT settings: migrating legacy 'mai' API key to 'cloud'");
+            settings
+                .stt_api_keys
+                .insert("cloud".to_string(), legacy_mai_key);
+        }
+        settings.stt_api_keys.remove("mai");
+        changed = true;
+    }
+
+    if !settings.stt_api_keys.contains_key("cloud") {
+        warn!("Normalizing STT settings: missing API key entry for provider 'cloud'");
         settings
             .stt_api_keys
-            .insert("mai".to_string(), String::new());
+            .insert("cloud".to_string(), String::new());
         changed = true;
     }
 
     if settings.stt_cloud_model.trim().is_empty() {
         warn!("Normalizing STT settings: empty cloud model value");
         settings.stt_cloud_model = default_stt_cloud_model();
+        changed = true;
+    }
+
+    if settings.stt_base_url.trim().is_empty() {
+        warn!("Normalizing STT settings: empty cloud base URL value");
+        settings.stt_base_url = default_stt_base_url();
         changed = true;
     }
 
@@ -923,6 +947,7 @@ pub fn get_default_settings() -> AppSettings {
         stt_provider: SttProviderKind::default(),
         stt_fallback_strategy: SttFallbackStrategy::default(),
         stt_cloud_model: default_stt_cloud_model(),
+        stt_base_url: default_stt_base_url(),
         stt_api_keys: default_stt_api_keys(),
         stt_connect_timeout_ms: default_stt_connect_timeout_ms(),
         stt_request_timeout_ms: default_stt_request_timeout_ms(),

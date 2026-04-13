@@ -148,9 +148,12 @@ const settingUpdaters: {
     commands.changeSttFallbackStrategySetting(value as string),
   stt_cloud_model: (value) =>
     commands.changeSttCloudModelSetting(value as string),
+  stt_base_url: (value) => commands.changeSttBaseUrlSetting(value as string),
   stt_api_keys: (value) =>
     commands.changeSttApiKeySetting(
-      ((value as Record<string, string>)?.mai ?? "") as string,
+      ((value as Record<string, string>)?.cloud ??
+        (value as Record<string, string>)?.mai ??
+        "") as string,
     ),
   stt_connect_timeout_ms: (value) =>
     commands.changeSttConnectTimeoutSetting(value as number),

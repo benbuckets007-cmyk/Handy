@@ -258,20 +258,26 @@
       "stt": {
         "provider": {
           "title": "Transcription Provider",
-          "description": "Choose whether transcription runs locally or through MAI cloud.",
+          "description": "Choose whether transcription runs locally or through your cloud API.",
           "options": {
             "local": "Local",
-            "mai": "MAI Cloud"
+            "cloud": "Cloud API",
+            "mai": "Cloud API"
           }
+        },
+        "baseUrl": {
+          "title": "Cloud Base URL",
+          "description": "Base URL for your transcription API.",
+          "placeholder": "https://api.example.com/v1"
         },
         "cloudModel": {
           "title": "Cloud Model",
-          "description": "Model identifier used for MAI cloud transcription.",
+          "description": "Model identifier sent to your cloud transcription API.",
           "placeholder": "MAI-Transcribe-1"
         },
         "apiKey": {
-          "title": "MAI API Key",
-          "description": "API key used for MAI cloud transcription requests.",
+          "title": "Cloud API Key",
+          "description": "API key used for cloud transcription requests.",
           "placeholder": "Enter API key"
         },
         "fallbackStrategy": {
@@ -292,7 +298,7 @@
           "description": "Maximum total time allowed for a cloud transcription request."
         },
         "errors": {
-          "cloudOnlyRequiresKey": "Cloud-only mode requires a valid MAI API key. Local fallback is disabled in this mode."
+          "cloudOnlyRequiresKey": "Cloud-only mode requires a valid cloud API key. Local fallback is disabled in this mode."
         }
       },
       "acceleration": {

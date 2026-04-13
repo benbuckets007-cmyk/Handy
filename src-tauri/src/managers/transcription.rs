@@ -1,7 +1,8 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::cloud_transcription::{
-    transcribe_mai_wav_bytes, wav_bytes_from_f32, MAI_DEFAULT_SAMPLE_RATE_HZ, MAI_PROVIDER_ID,
+    transcribe_cloud_wav_bytes, wav_bytes_from_f32, STT_CLOUD_DEFAULT_SAMPLE_RATE_HZ,
+    STT_CLOUD_PROVIDER_ID,
 };
 use crate::managers::model::{EngineType, ModelManager};
 use crate::settings::{
@@ -468,7 +469,7 @@ impl TranscriptionManager {
         {
             self.transcribe_local(&audio, &settings)?
         } else {
-            provider_used = "mai";
+            provider_used = "cloud";
             self.transcribe_with_cloud_routing(&audio, &settings, &mut fallback_used)?
         };
 
@@ -499,7 +500,8 @@ impl TranscriptionManager {
     ) -> Result<String> {
         let api_key = settings
             .stt_api_keys
-            .get(MAI_PROVIDER_ID)
+            .get(STT_CLOUD_PROVIDER_ID)
+            .or_else(|| settings.stt_api_keys.get("mai"))
             .map(|key| key.trim())
             .unwrap_or("");
         let cloud_only = settings.stt_fallback_strategy == SttFallbackStrategy::CloudOnly;
@@ -511,17 +513,18 @@ impl TranscriptionManager {
                 ));
             }
 
-            warn!("Cloud transcription fallback triggered: provider=mai, reason=missing_api_key");
+            warn!("Cloud transcription fallback triggered: provider=cloud, reason=missing_api_key");
             *fallback_used = true;
             return self.transcribe_local(audio, settings);
         }
 
         let allow_retry = settings.stt_fallback_strategy == SttFallbackStrategy::CloudOnly;
-        let wav_bytes = wav_bytes_from_f32(audio, MAI_DEFAULT_SAMPLE_RATE_HZ)
+        let wav_bytes = wav_bytes_from_f32(audio, STT_CLOUD_DEFAULT_SAMPLE_RATE_HZ)
             .map_err(|e| anyhow::anyhow!(e.message))?;
 
-        match transcribe_mai_wav_bytes(
+        match transcribe_cloud_wav_bytes(
             wav_bytes,
+            &settings.stt_base_url,
             api_key,
             &settings.stt_cloud_model,
             settings.stt_connect_timeout_ms,
@@ -531,7 +534,7 @@ impl TranscriptionManager {
             Ok(text) => Ok(text),
             Err(err) => {
                 warn!(
-                    "Cloud transcription failed: provider=mai, error_class={}",
+                    "Cloud transcription failed: provider=cloud, error_class={}",
                     err.class.as_str()
                 );
 
@@ -539,7 +542,7 @@ impl TranscriptionManager {
                     && err.is_retryable()
                 {
                     warn!(
-                        "Cloud transcription fallback triggered: provider=mai, error_class={}",
+                        "Cloud transcription fallback triggered: provider=cloud, error_class={}",
                         err.class.as_str()
                     );
                     *fallback_used = true;

@@ -341,7 +341,8 @@
           "description": "Choose whether transcription runs locally or through MAI cloud.",
           "options": {
             "local": "Local",
-            "mai": "MAI Cloud"
+            "mai": "MAI Cloud",
+            "cloud": "Cloud API"
           }
         },
         "cloudModel": {
@@ -373,6 +374,11 @@
         },
         "errors": {
           "cloudOnlyRequiresKey": "Cloud-only mode requires a valid MAI API key. Local fallback is disabled in this mode."
+        },
+        "baseUrl": {
+          "title": "Cloud Base URL",
+          "description": "Base URL for your transcription API.",
+          "placeholder": "https://api.example.com/v1"
         }
       }
     },

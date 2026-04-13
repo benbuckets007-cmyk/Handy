@@ -351,6 +351,7 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_stt_provider_setting,
             shortcut::change_stt_fallback_strategy_setting,
             shortcut::change_stt_cloud_model_setting,
+            shortcut::change_stt_base_url_setting,
             shortcut::change_stt_api_key_setting,
             shortcut::change_stt_connect_timeout_setting,
             shortcut::change_stt_request_timeout_setting,
