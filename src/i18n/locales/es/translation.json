@@ -356,6 +356,46 @@
         "add": "Agregar",
         "remove": "Eliminar {{word}}",
         "duplicate": "\"{{word}}\" ya existe"
+      },
+      "stt": {
+        "provider": {
+          "title": "Transcription Provider",
+          "description": "Choose whether transcription runs locally or through MAI cloud.",
+          "options": {
+            "local": "Local",
+            "mai": "MAI Cloud"
+          }
+        },
+        "cloudModel": {
+          "title": "Cloud Model",
+          "description": "Model identifier used for MAI cloud transcription.",
+          "placeholder": "MAI-Transcribe-1"
+        },
+        "apiKey": {
+          "title": "MAI API Key",
+          "description": "API key used for MAI cloud transcription requests.",
+          "placeholder": "Enter API key"
+        },
+        "fallbackStrategy": {
+          "title": "Fallback Strategy",
+          "description": "Define how cloud and local transcription should be routed.",
+          "options": {
+            "cloudFirstLocalFallback": "Cloud First, Fallback to Local",
+            "localOnly": "Local Only",
+            "cloudOnly": "Cloud Only"
+          }
+        },
+        "connectTimeout": {
+          "title": "Cloud Connect Timeout (ms)",
+          "description": "Maximum time to establish a cloud connection."
+        },
+        "requestTimeout": {
+          "title": "Cloud Request Timeout (ms)",
+          "description": "Maximum total time allowed for a cloud transcription request."
+        },
+        "errors": {
+          "cloudOnlyRequiresKey": "Cloud-only mode requires a valid MAI API key. Local fallback is disabled in this mode."
+        }
       }
     },
     "postProcessing": {

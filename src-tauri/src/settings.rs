@@ -170,6 +170,62 @@ pub enum KeyboardImplementation {
     HandyKeys,
 }
 
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SttProviderKind {
+    Local,
+    Mai,
+}
+
+impl<'de> Deserialize<'de> for SttProviderKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "local" => SttProviderKind::Local,
+            "mai" => SttProviderKind::Mai,
+            _ => SttProviderKind::default(),
+        })
+    }
+}
+
+impl Default for SttProviderKind {
+    fn default() -> Self {
+        SttProviderKind::Local
+    }
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SttFallbackStrategy {
+    CloudFirstLocalFallback,
+    LocalOnly,
+    CloudOnly,
+}
+
+impl<'de> Deserialize<'de> for SttFallbackStrategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "cloud_first_local_fallback" => SttFallbackStrategy::CloudFirstLocalFallback,
+            "local_only" => SttFallbackStrategy::LocalOnly,
+            "cloud_only" => SttFallbackStrategy::CloudOnly,
+            _ => SttFallbackStrategy::default(),
+        })
+    }
+}
+
+impl Default for SttFallbackStrategy {
+    fn default() -> Self {
+        SttFallbackStrategy::CloudFirstLocalFallback
+    }
+}
+
 impl Default for KeyboardImplementation {
     fn default() -> Self {
         #[cfg(target_os = "linux")]
@@ -430,6 +486,18 @@ pub struct AppSettings {
     pub whisper_gpu_device: i32,
     #[serde(default)]
     pub extra_recording_buffer_ms: u64,
+    #[serde(default)]
+    pub stt_provider: SttProviderKind,
+    #[serde(default)]
+    pub stt_fallback_strategy: SttFallbackStrategy,
+    #[serde(default = "default_stt_cloud_model")]
+    pub stt_cloud_model: String,
+    #[serde(default = "default_stt_api_keys")]
+    pub stt_api_keys: SecretMap,
+    #[serde(default = "default_stt_connect_timeout_ms")]
+    pub stt_connect_timeout_ms: u64,
+    #[serde(default = "default_stt_request_timeout_ms")]
+    pub stt_request_timeout_ms: u64,
 }
 
 fn default_model() -> String {
@@ -644,6 +712,54 @@ fn default_typing_tool() -> TypingTool {
     TypingTool::Auto
 }
 
+fn default_stt_cloud_model() -> String {
+    "MAI-Transcribe-1".to_string()
+}
+
+fn default_stt_api_keys() -> SecretMap {
+    SecretMap(HashMap::from([("mai".to_string(), String::new())]))
+}
+
+fn default_stt_connect_timeout_ms() -> u64 {
+    3_000
+}
+
+fn default_stt_request_timeout_ms() -> u64 {
+    30_000
+}
+
+fn ensure_stt_defaults(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+
+    if !settings.stt_api_keys.contains_key("mai") {
+        warn!("Normalizing STT settings: missing API key entry for provider 'mai'");
+        settings
+            .stt_api_keys
+            .insert("mai".to_string(), String::new());
+        changed = true;
+    }
+
+    if settings.stt_cloud_model.trim().is_empty() {
+        warn!("Normalizing STT settings: empty cloud model value");
+        settings.stt_cloud_model = default_stt_cloud_model();
+        changed = true;
+    }
+
+    if settings.stt_connect_timeout_ms == 0 {
+        warn!("Normalizing STT settings: connect timeout must be > 0");
+        settings.stt_connect_timeout_ms = default_stt_connect_timeout_ms();
+        changed = true;
+    }
+
+    if settings.stt_request_timeout_ms == 0 {
+        warn!("Normalizing STT settings: request timeout must be > 0");
+        settings.stt_request_timeout_ms = default_stt_request_timeout_ms();
+        changed = true;
+    }
+
+    changed
+}
+
 fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
     for provider in default_post_process_providers() {
@@ -804,6 +920,12 @@ pub fn get_default_settings() -> AppSettings {
         ort_accelerator: OrtAcceleratorSetting::default(),
         whisper_gpu_device: default_whisper_gpu_device(),
         extra_recording_buffer_ms: 0,
+        stt_provider: SttProviderKind::default(),
+        stt_fallback_strategy: SttFallbackStrategy::default(),
+        stt_cloud_model: default_stt_cloud_model(),
+        stt_api_keys: default_stt_api_keys(),
+        stt_connect_timeout_ms: default_stt_connect_timeout_ms(),
+        stt_request_timeout_ms: default_stt_request_timeout_ms(),
     }
 }
 
@@ -874,7 +996,14 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let mut normalized = false;
     if ensure_post_process_defaults(&mut settings) {
+        normalized = true;
+    }
+    if ensure_stt_defaults(&mut settings) {
+        normalized = true;
+    }
+    if normalized {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -898,7 +1027,14 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let mut normalized = false;
     if ensure_post_process_defaults(&mut settings) {
+        normalized = true;
+    }
+    if ensure_stt_defaults(&mut settings) {
+        normalized = true;
+    }
+    if normalized {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 

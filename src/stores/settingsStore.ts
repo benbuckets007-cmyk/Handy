@@ -143,6 +143,19 @@ const settingUpdaters: {
     commands.changeExperimentalEnabledSetting(value as boolean),
   lazy_stream_close: (value) =>
     commands.changeLazyStreamCloseSetting(value as boolean),
+  stt_provider: (value) => commands.changeSttProviderSetting(value as string),
+  stt_fallback_strategy: (value) =>
+    commands.changeSttFallbackStrategySetting(value as string),
+  stt_cloud_model: (value) =>
+    commands.changeSttCloudModelSetting(value as string),
+  stt_api_keys: (value) =>
+    commands.changeSttApiKeySetting(
+      ((value as Record<string, string>)?.mai ?? "") as string,
+    ),
+  stt_connect_timeout_ms: (value) =>
+    commands.changeSttConnectTimeoutSetting(value as number),
+  stt_request_timeout_ms: (value) =>
+    commands.changeSttRequestTimeoutSetting(value as number),
   show_tray_icon: (value) =>
     commands.changeShowTrayIconSetting(value as boolean),
   whisper_accelerator: (value) =>

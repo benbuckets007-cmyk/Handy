@@ -23,8 +23,8 @@ use tauri_plugin_autostart::ManagerExt;
 use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
     self, get_settings, AutoSubmitKey, ClipboardHandling, KeyboardImplementation, LLMPrompt,
-    OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, TypingTool,
-    APPLE_INTELLIGENCE_PROVIDER_ID,
+    OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, SttFallbackStrategy,
+    SttProviderKind, TypingTool, APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -820,6 +820,97 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
 pub fn change_experimental_enabled_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.experimental_enabled = enabled;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_provider_setting(app: AppHandle, provider: String) -> Result<(), String> {
+    let parsed = match provider.as_str() {
+        "local" => SttProviderKind::Local,
+        "mai" => SttProviderKind::Mai,
+        _ => {
+            return Err(format!(
+                "Invalid STT provider '{}'. Expected one of: local, mai",
+                provider
+            ));
+        }
+    };
+    let mut settings = settings::get_settings(&app);
+    settings.stt_provider = parsed;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_fallback_strategy_setting(
+    app: AppHandle,
+    strategy: String,
+) -> Result<(), String> {
+    let parsed = match strategy.as_str() {
+        "cloud_first_local_fallback" => SttFallbackStrategy::CloudFirstLocalFallback,
+        "local_only" => SttFallbackStrategy::LocalOnly,
+        "cloud_only" => SttFallbackStrategy::CloudOnly,
+        _ => {
+            return Err(format!(
+                "Invalid STT fallback strategy '{}'. Expected one of: cloud_first_local_fallback, local_only, cloud_only",
+                strategy
+            ));
+        }
+    };
+    let mut settings = settings::get_settings(&app);
+    settings.stt_fallback_strategy = parsed;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_cloud_model_setting(app: AppHandle, model: String) -> Result<(), String> {
+    let trimmed = model.trim();
+    if trimmed.is_empty() {
+        return Err("Cloud model cannot be empty".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.stt_cloud_model = trimmed.to_string();
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_api_key_setting(app: AppHandle, api_key: String) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.stt_api_keys.insert("mai".to_string(), api_key);
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_connect_timeout_setting(app: AppHandle, timeout_ms: u64) -> Result<(), String> {
+    if timeout_ms == 0 {
+        return Err("Connect timeout must be greater than 0 ms".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.stt_connect_timeout_ms = timeout_ms;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_stt_request_timeout_setting(app: AppHandle, timeout_ms: u64) -> Result<(), String> {
+    if timeout_ms == 0 {
+        return Err("Request timeout must be greater than 0 ms".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.stt_request_timeout_ms = timeout_ms;
     settings::write_settings(&app, settings);
     Ok(())
 }

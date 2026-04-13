@@ -1,8 +1,12 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
+use crate::managers::cloud_transcription::{
+    transcribe_mai_wav_bytes, wav_bytes_from_f32, MAI_DEFAULT_SAMPLE_RATE_HZ, MAI_PROVIDER_ID,
+};
 use crate::managers::model::{EngineType, ModelManager};
 use crate::settings::{
-    get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
+    get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, SttFallbackStrategy,
+    SttProviderKind, WhisperAcceleratorSetting,
 };
 use anyhow::Result;
 use log::{debug, error, info, warn};
@@ -445,11 +449,8 @@ impl TranscriptionManager {
             ));
         }
 
-        // Update last activity timestamp
         self.touch_activity();
-
-        let st = std::time::Instant::now();
-
+        let started = std::time::Instant::now();
         debug!("Audio vector length: {}", audio.len());
 
         if audio.is_empty() {
@@ -458,25 +459,112 @@ impl TranscriptionManager {
             return Ok(String::new());
         }
 
-        // Check if model is loaded, if not try to load it
-        {
-            // If the model is loading, wait for it to complete.
-            let mut is_loading = self.is_loading.lock().unwrap();
-            while *is_loading {
-                is_loading = self.loading_condvar.wait(is_loading).unwrap();
-            }
+        let settings = get_settings(&self.app_handle);
+        let mut provider_used = "local";
+        let mut fallback_used = false;
 
-            let engine_guard = self.lock_engine();
-            if engine_guard.is_none() {
-                return Err(anyhow::anyhow!("Model is not loaded for transcription."));
-            }
+        let raw_text = if settings.stt_fallback_strategy == SttFallbackStrategy::LocalOnly
+            || settings.stt_provider == SttProviderKind::Local
+        {
+            self.transcribe_local(&audio, &settings)?
+        } else {
+            provider_used = "mai";
+            self.transcribe_with_cloud_routing(&audio, &settings, &mut fallback_used)?
+        };
+
+        let final_result = filter_transcription_output(
+            &raw_text,
+            &settings.app_language,
+            &settings.custom_filler_words,
+        );
+
+        let elapsed_ms = started.elapsed().as_millis();
+        info!(
+            "Transcription completed: provider={}, latency_ms={}, fallback_used={}",
+            provider_used, elapsed_ms, fallback_used
+        );
+        if final_result.is_empty() {
+            info!("Transcription completed with empty output");
         }
 
-        // Get current settings for configuration
-        let settings = get_settings(&self.app_handle);
+        self.maybe_unload_immediately("transcription");
+        Ok(final_result)
+    }
 
-        // Validate selected language against the model's supported languages.
-        // If the language isn't supported, fall back to "auto" to prevent errors.
+    fn transcribe_with_cloud_routing(
+        &self,
+        audio: &[f32],
+        settings: &AppSettings,
+        fallback_used: &mut bool,
+    ) -> Result<String> {
+        let api_key = settings
+            .stt_api_keys
+            .get(MAI_PROVIDER_ID)
+            .map(|key| key.trim())
+            .unwrap_or("");
+        let cloud_only = settings.stt_fallback_strategy == SttFallbackStrategy::CloudOnly;
+
+        if api_key.is_empty() {
+            if cloud_only {
+                return Err(anyhow::anyhow!(
+                    "Cloud transcription is enabled but the MAI API key is missing."
+                ));
+            }
+
+            warn!("Cloud transcription fallback triggered: provider=mai, reason=missing_api_key");
+            *fallback_used = true;
+            return self.transcribe_local(audio, settings);
+        }
+
+        let allow_retry = settings.stt_fallback_strategy == SttFallbackStrategy::CloudOnly;
+        let wav_bytes = wav_bytes_from_f32(audio, MAI_DEFAULT_SAMPLE_RATE_HZ)
+            .map_err(|e| anyhow::anyhow!(e.message))?;
+
+        match transcribe_mai_wav_bytes(
+            wav_bytes,
+            api_key,
+            &settings.stt_cloud_model,
+            settings.stt_connect_timeout_ms,
+            settings.stt_request_timeout_ms,
+            allow_retry,
+        ) {
+            Ok(text) => Ok(text),
+            Err(err) => {
+                warn!(
+                    "Cloud transcription failed: provider=mai, error_class={}",
+                    err.class.as_str()
+                );
+
+                if settings.stt_fallback_strategy == SttFallbackStrategy::CloudFirstLocalFallback
+                    && err.is_retryable()
+                {
+                    warn!(
+                        "Cloud transcription fallback triggered: provider=mai, error_class={}",
+                        err.class.as_str()
+                    );
+                    *fallback_used = true;
+                    return self.transcribe_local(audio, settings);
+                }
+
+                Err(anyhow::anyhow!(err.message))
+            }
+        }
+    }
+
+    fn transcribe_local(&self, audio: &[f32], settings: &AppSettings) -> Result<String> {
+        // If the model is loading, wait for it to complete.
+        let mut is_loading = self.is_loading.lock().unwrap();
+        while *is_loading {
+            is_loading = self.loading_condvar.wait(is_loading).unwrap();
+        }
+        drop(is_loading);
+
+        let engine_guard = self.lock_engine();
+        if engine_guard.is_none() {
+            return Err(anyhow::anyhow!("Model is not loaded for transcription."));
+        }
+        drop(engine_guard);
+
         let validated_language = if settings.selected_language == "auto" {
             "auto".to_string()
         } else {
@@ -502,15 +590,8 @@ impl TranscriptionManager {
             }
         };
 
-        // Perform transcription with the appropriate engine.
-        // We use catch_unwind to prevent engine panics from poisoning the mutex,
-        // which would make the app hang indefinitely on subsequent operations.
         let result = {
             let mut engine_guard = self.lock_engine();
-
-            // Take the engine out so we own it during transcription.
-            // If the engine panics, we simply don't put it back (effectively unloading it)
-            // instead of poisoning the mutex.
             let mut engine = match engine_guard.take() {
                 Some(e) => e,
                 None => {
@@ -519,8 +600,6 @@ impl TranscriptionManager {
                     ));
                 }
             };
-
-            // Release the lock before transcribing — no mutex held during the engine call
             drop(engine_guard);
 
             let transcribe_result = catch_unwind(AssertUnwindSafe(
@@ -552,7 +631,7 @@ impl TranscriptionManager {
                             };
 
                             whisper_engine
-                                .transcribe_with(&audio, &params)
+                                .transcribe_with(audio, &params)
                                 .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))
                         }
                         LoadedEngine::Parakeet(parakeet_engine) => {
@@ -561,16 +640,16 @@ impl TranscriptionManager {
                                 ..Default::default()
                             };
                             parakeet_engine
-                                .transcribe_with(&audio, &params)
+                                .transcribe_with(audio, &params)
                                 .map_err(|e| {
                                     anyhow::anyhow!("Parakeet transcription failed: {}", e)
                                 })
                         }
                         LoadedEngine::Moonshine(moonshine_engine) => moonshine_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
+                            .transcribe(audio, &TranscribeOptions::default())
                             .map_err(|e| anyhow::anyhow!("Moonshine transcription failed: {}", e)),
                         LoadedEngine::MoonshineStreaming(streaming_engine) => streaming_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
+                            .transcribe(audio, &TranscribeOptions::default())
                             .map_err(|e| {
                                 anyhow::anyhow!("Moonshine streaming transcription failed: {}", e)
                             }),
@@ -588,13 +667,13 @@ impl TranscriptionManager {
                                 use_itn: Some(true),
                             };
                             sense_voice_engine
-                                .transcribe_with(&audio, &params)
+                                .transcribe_with(audio, &params)
                                 .map_err(|e| {
                                     anyhow::anyhow!("SenseVoice transcription failed: {}", e)
                                 })
                         }
                         LoadedEngine::GigaAM(gigaam_engine) => gigaam_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
+                            .transcribe(audio, &TranscribeOptions::default())
                             .map_err(|e| anyhow::anyhow!("GigaAM transcription failed: {}", e)),
                         LoadedEngine::Canary(canary_engine) => {
                             let lang = if validated_language == "auto" {
@@ -608,7 +687,7 @@ impl TranscriptionManager {
                                 ..Default::default()
                             };
                             canary_engine
-                                .transcribe(&audio, &options)
+                                .transcribe(audio, &options)
                                 .map_err(|e| anyhow::anyhow!("Canary transcription failed: {}", e))
                         }
                         LoadedEngine::Cohere(cohere_engine) => {
@@ -626,7 +705,7 @@ impl TranscriptionManager {
                                 ..Default::default()
                             };
                             cohere_engine
-                                .transcribe(&audio, &options)
+                                .transcribe(audio, &options)
                                 .map_err(|e| anyhow::anyhow!("Cohere transcription failed: {}", e))
                         }
                     }
@@ -635,14 +714,11 @@ impl TranscriptionManager {
 
             match transcribe_result {
                 Ok(inner_result) => {
-                    // Success or normal error — put the engine back
                     let mut engine_guard = self.lock_engine();
                     *engine_guard = Some(engine);
                     inner_result?
                 }
                 Err(panic_payload) => {
-                    // Engine panicked — do NOT put it back (it's in an unknown state).
-                    // The engine is dropped here, effectively unloading it.
                     let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
                         s.to_string()
                     } else if let Some(s) = panic_payload.downcast_ref::<String>() {
@@ -655,7 +731,6 @@ impl TranscriptionManager {
                         panic_msg
                     );
 
-                    // Clear the model ID so it will be reloaded on next attempt
                     {
                         let mut current_model = self
                             .current_model_id
@@ -682,8 +757,6 @@ impl TranscriptionManager {
             }
         };
 
-        // Apply word correction if custom words are configured.
-        // Skip for Whisper models since custom words are already passed as initial_prompt.
         let is_whisper = self
             .model_manager
             .get_model_info(&settings.selected_model)
@@ -700,36 +773,7 @@ impl TranscriptionManager {
             result.text
         };
 
-        // Filter out filler words and hallucinations
-        let filtered_result = filter_transcription_output(
-            &corrected_result,
-            &settings.app_language,
-            &settings.custom_filler_words,
-        );
-
-        let et = std::time::Instant::now();
-        let translation_note = if settings.translate_to_english {
-            " (translated)"
-        } else {
-            ""
-        };
-        info!(
-            "Transcription completed in {}ms{}",
-            (et - st).as_millis(),
-            translation_note
-        );
-
-        let final_result = filtered_result;
-
-        if final_result.is_empty() {
-            info!("Transcription result is empty");
-        } else {
-            info!("Transcription result: {}", final_result);
-        }
-
-        self.maybe_unload_immediately("transcription");
-
-        Ok(final_result)
+        Ok(corrected_result)
     }
 }
 

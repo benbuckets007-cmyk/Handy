@@ -129,21 +129,70 @@ fn build_apple_intelligence_bridge() {
     let object_path = out_dir.join("apple_intelligence.o");
     let static_lib_path = out_dir.join("libapple_intelligence.a");
 
-    let sdk_path = String::from_utf8(
-        Command::new("xcrun")
-            .args(["--sdk", "macosx", "--show-sdk-path"])
-            .output()
-            .expect("Failed to locate macOS SDK")
-            .stdout,
-    )
-    .expect("SDK path is not valid UTF-8")
-    .trim()
-    .to_string();
+    fn read_xcrun_output(args: &[&str]) -> Option<String> {
+        let output = match Command::new("xcrun").args(args).output() {
+            Ok(output) => output,
+            Err(err) => {
+                println!("cargo:warning=xcrun {:?} failed to start: {}", args, err);
+                return None;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if stderr.is_empty() {
+                println!(
+                    "cargo:warning=xcrun {:?} failed with status {}",
+                    args, output.status
+                );
+            } else {
+                println!("cargo:warning=xcrun {:?} failed: {}", args, stderr);
+            }
+            return None;
+        }
+
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    fn env_truthy(name: &str) -> bool {
+        env::var(name)
+            .map(|v| {
+                matches!(
+                    v.as_str(),
+                    "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    let force_disable = env_truthy("HANDY_DISABLE_APPLE_INTELLIGENCE");
+    if force_disable {
+        println!("cargo:warning=Apple Intelligence disabled by HANDY_DISABLE_APPLE_INTELLIGENCE.");
+    }
+
+    let sdk_path = read_xcrun_output(&["--sdk", "macosx", "--show-sdk-path"]).unwrap_or_else(|| {
+        panic!(
+            "Failed to locate macOS SDK via xcrun. Check that DEVELOPER_DIR points to a valid toolchain or unset it."
+        )
+    });
+
+    let using_command_line_tools = sdk_path.contains("/Library/Developer/CommandLineTools/");
+    if using_command_line_tools {
+        println!(
+            "cargo:warning=Command Line Tools SDK detected. Building Apple Intelligence stubs to avoid FoundationModels macro toolchain issues."
+        );
+    }
 
     // Check if the SDK supports FoundationModels (required for Apple Intelligence)
     let framework_path =
         Path::new(&sdk_path).join("System/Library/Frameworks/FoundationModels.framework");
-    let has_foundation_models = framework_path.exists();
+    let has_foundation_models =
+        !force_disable && !using_command_line_tools && framework_path.exists();
 
     let source_file = if has_foundation_models {
         println!("cargo:warning=Building with Apple Intelligence support.");
@@ -157,16 +206,11 @@ fn build_apple_intelligence_bridge() {
         panic!("Source file {} is missing!", source_file);
     }
 
-    let swiftc_path = String::from_utf8(
-        Command::new("xcrun")
-            .args(["--find", "swiftc"])
-            .output()
-            .expect("Failed to locate swiftc")
-            .stdout,
-    )
-    .expect("swiftc path is not valid UTF-8")
-    .trim()
-    .to_string();
+    let swiftc_path = read_xcrun_output(&["--find", "swiftc"]).unwrap_or_else(|| {
+        panic!(
+            "Failed to locate swiftc via xcrun. Check that DEVELOPER_DIR points to a valid Xcode/CLT path or unset it."
+        )
+    });
 
     let toolchain_swift_lib = Path::new(&swiftc_path)
         .parent()
