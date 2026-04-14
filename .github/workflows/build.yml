@@ -36,6 +36,10 @@ on:
         required: false
         type: boolean
         default: false
+      disable-updater-signing:
+        required: false
+        type: boolean
+        default: false
       repository:
         required: false
         type: string
@@ -349,6 +353,17 @@ jobs:
           $config = Get-Content $configPath -Raw | ConvertFrom-Json
           if ($null -ne $config.bundle.windows.signCommand) {
             $config.bundle.windows.PSObject.Properties.Remove("signCommand")
+          }
+          $config | ConvertTo-Json -Depth 100 | Set-Content $configPath -Encoding utf8
+
+      - name: Disable updater signing
+        if: inputs.disable-updater-signing
+        shell: pwsh
+        run: |
+          $configPath = "src-tauri/tauri.conf.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          if ($null -ne $config.plugins.updater) {
+            $config.plugins.PSObject.Properties.Remove("updater")
           }
           $config | ConvertTo-Json -Depth 100 | Set-Content $configPath -Encoding utf8
 
